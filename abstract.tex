@@ -1,0 +1,369 @@
+\section{Intent Machines in the Abstract}\label{sec:abstract}
+
+We introduce the notion of an ``intent machine" by starting with a maximally abstract definition and progressing to more concrete special cases. This section does not assume what an intent is. This allows later instantiation of intents as a variety of different things. Later in this report, intents will be instantiated as logical formulas that the state must satisfy, and later intents will be instantiated as bids in an auction. There is not necessarily a shared structure behind these instantiations, so this section will treat intents as merely an element of some set that our machine processes at each step. The goal of this section is not to formalize intents, but, rather, the processing of intents. The most abstract version, which we call a batch machine, takes a state, which is just the element of some set, $S$, and waits for an input batch $B$ (intuitively, a batch of \textit{intents}) for further processing. The guiding example for a state is that it should contain the total information describing a network in a single instant, though the goal of this section is to treat the subject more abstractly and we will not need to assume any structure on the state for now. Once it receives the batch, it then nondeterministically outputs a new state, along with an output batch produced from the old batch. The prototype instance assumes the output batch is a subset of the input batch that was actually processed, though this is not the case in general. Exactly what batches will be and how they should be processed is not enforced by the most general definition, but it will be enforced by special cases and used as a guiding intuition for the general case.
+
+\subsection{Intent Machines as Coalgebras}
+
+We begin with a maximally abstracted view of intent machines as a kind of coalgebra \citep{jacobs2017introduction}. We characterize them by their transition function, which will be a coalgebra over the monad $\mathcal{M}$ in~\eqref{eq:M-monad}, parameterized by some notion $N$ of nondeterminism, and a set $B$ of intent batches. If
+$S$ represents the machine state, we define $\mathcal{M}$ as
+
+\begin{equation}\label{eq:M-monad}
+    \mathcal{M}_B^N(S) := (N(S\times B))^B.
+\end{equation}
+
+Any function of type $S \rightarrow \mathcal{M}_B^N(S)$ for a fixed $S$ is a transition function and coalgebra over $\mathcal{M}_B^N$. $\mathcal{M}$ will denote $\mathcal{M}_B^N$, wherever $N$ and $B$ are clear from context. The join operation for the monad $\mathcal{M}$ is denoted by $\mu_\mathcal{M}$. That $\mathcal{M}$ is a monad is shown
+in \Cref{monadProof}. Other than the standard properties of a monad, we only assume that there is an additional parametrically polymorphic function \citep{pierce2002types} called \say{$\mathsf{sample}$} of type $\forall \alpha. N(\alpha) \rightarrow \alpha$. This function implements a sampling procedure whose details we will not specify.
+
+A machine, itself, is a pair consisting of a current state and a transition function. This is not a full intent machine, so we will call it a \say{batch machine}, and we will see that full intent machines are a special case of batch machines. Batch machines are themselves variants of Mealy machines \citep{bonsangue2008coalgebraic} where we've added nondeterminism and forced the inputs and outputs to be the same set, $B$.
+
+One may wonder why we do not bundle the batch and the state, as we may rewrite the transition function type as the isomorphic $S \times B \rightarrow N(S \times B)$, now a coalgebra over $N$. This would be an incorrect interpretation, however, as the output batch is not fed back into the machine at each time step, only the state is. That is, given a batch machine, $(s, m)$, and a stream of batches, $bs : \text{Stream}\ B$, we may run the machine, producing another stream of batches as an output defined by the following corecursive equation:
+
+\begin{equation}
+    \text{eval}\ m\ s\ bs : \text{Stream}\ B :=\quad \text{let}\ x : S \times B = \text{sample}\ (m\ s\ (\text{head}\ bs))\ \text{in}\quad \pi_2\ x\ ::\ \text{eval}\ m\ (\pi_1\ x)\ (\text{tail}\ bs)
+\end{equation}
+
+Where $\pi_1 : A \times B \rightarrow A$ and $\pi_2 : A \times B \rightarrow B$ are the projection functions out of a product.
+
+With this level of abstraction, we may start characterizing the most generic notions of composition. The most obvious stems from the observations that coalgebras over a monad are arrows in a Klesli category, giving rise to a sequential notion of composition, the ``Klesli composition" of two machine transition functions. Given two transition functions, $m_1$ and $m_2$
+of type $S \to \mathcal{M}(S)$, we may define this notion of composition as follows;
+
+\begin{equation}
+    m_1 \circ_{\text{Kleisli}} m_2 := \mu_{\mathcal{M}} \circ \mathcal{M}(m_1) \circ m_2
+\end{equation}
+digrammatically
+% https://q.uiver.app/#q=WzAsNCxbMCwwLCJTIl0sWzIsMCwiXFxtYXRoY2Fse019KFMpIl0sWzQsMCwiXFxtYXRoY2Fse019XjIoUykiXSxbNiwwLCJcXG1hdGhjYWx7TX0oUykiXSxbMCwxLCJtXzIiXSxbMSwyLCJcXG1hdGhjYWx7TX0obV8xKSJdLFsyLDMsIlxcbXVfe1xcbWF0aGNhbHtNfSwgU30iXV0=
+\[\begin{tikzcd}[cramped]
+	S && {\mathcal{M}(S)} && {\mathcal{M}^2(S)} && {\mathcal{M}(S)}
+	\arrow["{m_2}", from=1-1, to=1-3]
+	\arrow["{\mathcal{M}(m_1)}", from=1-3, to=1-5]
+	\arrow["{\mu_{\mathcal{M}, S}}", from=1-5, to=1-7]
+\end{tikzcd}\]
+
+Where $\mu$ is the multiplication operation of the monad. In practice, what this will do is evaluate the input state on $m_2$ send the output batch to $m_1$. This essentially defines a basic notion of sequential composition. The output will be the output of $m_1$.
+
+This notion of composition will be unsatisfactory in general due to the output batch of $m_2$ being thrown away. In general, we may provide a function to combine output batches, $u : B \times B \rightarrow B$, and generalize Kleisli composition as:
+
+\begin{equation}\label{eq:Klesli-composition}
+    m_1 \circ_{u} m_2 := \lambda s\ b.\ \mu_{N}(N(\lambda s_1\ b_1. N(\lambda s_2\ b_2. (s_2,\ u\ b_1\ b_2)) (m_1\ s_1\ b_1)) (m_2\ s\ b))
+\end{equation}
+
+In practice, $u$ will typically be the union of two sets.
+
+We may generalize this further. If we introduce a function that processes batches based on an output batch, $f : B \times B \rightarrow B$, then we can update the input batch to $m_1$ instead of giving it a raw copy.
+
+\begin{equation}\label{eq:Klesli-composition-f}
+    m_1 \circ^{f}_{u} m_2 := \lambda s\ b.\ \mu_{N}(N(\lambda s_1\ b_1. N(\lambda s_2\ b_2. (s_2,\ u\ b_1\ b_2)) (m_1\ s_1\ (f\ b\ b_1))) (m_2\ s\ b))
+\end{equation}
+
+
+A typical use case might have $f$ be something like a filtering function, such as the set difference operation. This would allow the second machine to receive only those intents that were not processed by the first machine.
+
+These compositions still enforce a notion of sequential compositionality. Application-wise, we may think of both machines collaborating on the same batch of intents. $m_2$ does what it can to satisfy the batch, it then updates the state and $m_1$ does its best to satisfy the same batch given the state change $m_2$ made. An example where this might be useful is if we have a machine that ignores batches and performs some bureaucratic function, such as flipping a bit within the state. If we have another machine whose behavior varies based on this bit but does not change it, then Klesli composing the bureaucrat machine with the bit-sensitive machine will create a machine that flips between the two modes of the bit-sensitive machine at each step. Another use case may occur if the batches can be split into two sub-batches, $B \cong B_1 \times B_2$. If we have two machines, one that only works on the $B_1$ part and another that only works on the $B_2$ part, then we can use Klesli composition to create a machine that works on the whole $B$.
+
+We may also combine the underlying states of two machines for a notion of parallel composition. If we have $m_1 : S_1 \to \mathcal{M}(S_1)$ and $m_2 : S_2 \to \mathcal{M}(S_2)$, then we can define $m_1 \times_{u} m_2 : S_1 \times S_2 \to \mathcal{M}(S_1 \times S_2)$ as
+
+\begin{equation}
+    m_1 \times_{u} m_2 := \lambda (s_1, s_2)\ b.\ \mu_N(\textit{}N(\lambda (s_1', b_1).\ N(\lambda (s_2', b_2).\ (s_1',\ s_2',\ u\ b_1\ b_2))\ (m_2\ s_2\ b))\ (m_1\ s_1\ b))
+\end{equation}
+
+While we may not want to enforce a sequential nature to the composition, we may provide separate filtering functions to herd different parts of the batches to different machines. Assuming we have $f_1 : B \rightarrow B_1$ and $f_2 : B \rightarrow B_2$, and further generalize the previous types to $m_1 : S_1 \to \mathcal{M}^N_{B_1}(S_1)$, $m_2 : S_2 \to \mathcal{M}^N_{B_2}(S_2)$, and $u : B_1 \times B_2 \rightarrow B$, we may define;
+
+\begin{equation}
+    m_1 \times^{f_1, f_2}_{u} m_2 := \lambda (s_1, s_2)\ b.\ \mu_N(\textit{}N(\lambda (s_1', b_1).\ N(\lambda (s_2', b_2).\ (s_1',\ s_2',\ u\ b_1\ b_2))\ (m_2\ s_2\ (f_2\ b)))\ (m_1\ s_1\ (f_1\ b)))
+\end{equation}
+
+We may provide a similar composition in the case of coproducts. We may define $m_1 + m_2 : S_1 + S_2 \to \mathcal{M}(S_1 + S_2)$ as
+
+\begin{equation}
+    m_1 + m_2 := [\mathcal{M}(\iota_1) \circ m_1,\ \mathcal{M}(\iota_2) \circ m_2]
+\end{equation}
+
+where
+
+\begin{equation}
+    f : X \rightarrow Z, g : Y \rightarrow Z \vdash [f,\ g] : X + Y \rightarrow Z
+\end{equation}
+
+is the universal property of the coproduct, and $\iota_1 : X \rightarrow X + Y$ and $\iota_2 : Y \rightarrow X + Y$ are the injections/constructors of the coproduct. This form of composition will switch between different machines depending on the form of the context. If $\mathbb{B}$ denotes the type of booleans, then, note that $\mathbb{B} \times S \cong S + S$. Therefore, switching between different machines based on a single bit is a special case of this kind of composition. Since only one machine can run in a given transition, there's no ambiguity or flexibility in terms of handling batch inputs/outputs. However, if there is some way to filter batches $B$ into two different types of batches with $f_1 : B \rightarrow B_1$ and $f_2 : B \rightarrow B_2$, and we can cast batches back into $B$ with $c_1 : B_1 \rightarrow B$ and $c_2 : B_2 \rightarrow B$, then we can use these to split the batches between the different machines with.
+
+\begin{equation}
+    m_1 +^{f_1, f_2}_{c_1, c_2} m_2 := [\lambda s. N(- \times -)(\iota_1, c_1) \circ m_1(s) \circ f_1
+    , \lambda s. N(- \times -)(\iota_2, c_2) \circ m_2(s) \circ f_2]
+\end{equation}
+
+Where $N(- \times -)$ is a somewhat abusive notation for the bi-functor map turning a pair of functions $A \rightarrow C$ and $B \rightarrow D$ into a function $N(A \times B) \rightarrow N(C \times D)$.
+
+We may ask what it means for two machines to be equivalent. This can be done by relating transition functions to final coalgebras. Given the greatest fixed point of $\mathcal{M}$, $G_\mathcal{M} := \nu X. (N(X \times B))^B$, the final coalgebra is the (isomorphism) coalgebra $\text{fix} : G_\mathcal{M} \rightarrow (N(G_\mathcal{M} \times B))^B$. What makes it final is the existence of, for any other coalgebra $c$ over the state $S$, a unique function $\text{beh}_c : S \rightarrow G_\mathcal{M}$ identified by the coalgebra homomorphism property;
+
+\begin{equation}
+\begin{tikzcd}
+S \arrow{r}{\text{beh}_c} \arrow[swap]{d}{c} & G_\mathcal{M} \arrow{d}{\text{fix}} \\
+\mathcal{M}(S) \arrow{r}{\mathcal{M}(\text{beh}_c)} & \mathcal{M}(G_\mathcal{M})
+\end{tikzcd}
+\end{equation}
+
+$G_\mathcal{M}$ represents the full, branching future history of a machine. It includes all points of interaction, all inputs, all outputs, and all layers of nondeterminism as a single, essentially infinite data structure. It includes exactly and only the observable aspects of a machine's execution. We may use it to define a natural notion of observational equivalence through the notion of behavioral equivalence. That is, we will treat two machines, $S_1$, $c_1$ and $S_2$, $c_2$, as ``the same machine" if they produce the same behavior, if $\text{beh}_{c_1}(S_1) = \text{beh}_{c_2}(S_2)$.
+
+We may further derive from any particular coalgebra a kind of modal logic \citep{kupke2011coalgebraic}. These work by defining a logic of predicates over states. We may have a predicate $P$, and define, for example, $\square P$ to mean that $P$ will always hold for the future, $\diamond P$ to mean that $P$ will eventually hold, etc. Our particular coalgebra complicates this by being both a labeled transition system (due to the inputs at each step) and being probabilistic, though there are existing modal logic constructions for these cases. Such an approach is most useful for characterizing the behavior we want to guarantee about the machine. For example, consider a machine that takes payments per intent, and the size of these payments dictates the effort the machine puts into satisfying intents. Such a statement should be characterizable via an appropriate modal statement. We may be able to give precise probabilities about the likelihood of satisfying an intent depending on the methods used, the intent in question, and payment. The details will heavily depend on the specifics.
+
+\subsection{Intents Discussion}
+
+From here, we can make the definition more specific to clarify the specifics of an intent machine. We set batches to be sets of intents, $B = \mathcal{P}(I)$, the powerset of some type of intent, $I$. This does not tell us much without knowing what intents are.
+
+We formulate intents as a pair consisting of a transition function and a partial weighted predicate over state transitions. The guiding intuition for this formulation is to separate control from desire. In the prototypical example of an intent, it will express a desire for some resource in exchange for another. The first component expresses a partial state transition where the intent may create/destroy what it has control over. This aids in composing intents. The second component expresses a kind of weighted predicate over transitions. If the transition satisfies the intent, then it returns an element between 0 and 1, representing a kind of utility.
+
+\begin{equation} \label{eq:intent}
+    I := (S \rightarrow S) \times (S \times S \rightarrow \star \cup [0, 1])
+\end{equation}
+
+where $\star$ is a singleton set with one element, which we will also call $\star$. In the case that $\star$ is returned, we consider the intent to be unsatisfied. This specifies the core structure of intents in so far as they are relevant to solving; that is to finding/optimizing transitions that actually satisfy intents. Note that this $S$ should be the same $S$ as the coalgebra is using in practice, although this is not a theoretical requirement. One may have trouble making useful transition functions if this $S$ differs from that in the coalgebra, and we will assume they are the same for the rest of this section. 
+
+The intuition is that the first function is a state transition the intent maker has control over. In a typical example of an intent where someone wants an A for a B, the intent maker has control over the B they want to trade. The transition function would simply delete the B the intent maker has from the state. The state is then unbalanced, giving leeway for changing resources to rebalance. The predicate expresses whether the intent is satisfied by any proposed transitions and, if it is, how satisfied the intent maker is.
+
+We will typically have a solving component, $\text{solver} : S \times \mathcal{P}(I) \rightarrow N(S \times \mathcal{P}(I))$, attempting to find state transition functions that satisfy the intents. This will have the property that, for all $s : S$, $is : \mathcal{P}(I)$, and all $s', is'$ in the support of $\text{solver}(s,\ is)$
+
+\begin{enumerate}
+\item $is' \subseteq is$, 
+\item $\forall i \in is'.\ \pi_2\ i\ s\ s' \neq \star$.
+\end{enumerate}
+
+This guarantees that any returned transition will satisfy the set of intents the solver claims to be solving.
+
+One question that emerges is the nature of intent composition. The goal of intent composition is to, in some way, simplify a collection of intents into a single intent. The main example is a situation where we have two intents, one expressing a want for a B in exchange for a C, and the other expressing a want for an A in exchange for a B. Between these, we have an A and a B, and we need a C to complete the exchange. If we commit to making this trade, then we can fuse these into a single intent of the form ``wants an A for a C". With this understanding in mind, we can motivate compositions.
+
+The transition functions of the intents can be composed directly as functions. The net function will involve both agents executing whatever they have control over.
+
+Composing the predicate requires more thought. We must make a new predicate representing the desires of both intents. We may characterize all relevant notions of composition through a choice of a function $f : (\star \cup [0, 1])^n \rightarrow \star \cup [0, 1]$. We may desire to split this function into a function that handles the $\star$ cases, and a function $f : [0, 1]^2 \rightarrow [0, 1]$. This is not possible in general, but for many approaches this makes sense. It requires the binary function to cleanly generalize to n-ary versions. This works so long as the operation is associative. There are, ultimately, two canonical ways to handle the $\star$s. We may always return a $\star$ so long as a single one is present, or we may return a $\star$ only when there is no other option. The former is the obvious choice, as we want the composition to be dissatisfied if either of the composites are. As for the associative, normalization preserving operations, three non-trivial operations that may be considered commonplace are max, min, and multiplication.
+
+Since composition is supposed to characterize a situation where the first party is already satisfied, whatever we choose should be equivalent to the predicate of the second party in the case that the first party is fully satisfied. This reduces the options to either multiplication or min. Further thought will be required to understand what things should be.
+
+To summarize, we can define intent composition as
+
+\begin{equation}
+    (t_1, p_1) \uparrow (t_2, p_2) := (t_1 \circ t_2, \lambda (s_i, s_o). \text{lift2M} * (p_1\ (t_2\ s_i, s_o))\ (p_2\ (t_1\ s_i, s_o)))
+\end{equation}
+
+We've issued transition functions to the states of each predicate's input state. Each already lives in their own post-execution state. This forces both to live in the same post-execution state.
+
+% One operation that one might be tempted to use is averaging. While there is a version of averaging of any fixed arity, averaging is not associative. For example, given 0.5, 0.4, and 0.7, the average of all three is ~0.53, but the average of 0.5 and 0.4 is 0.45, and the average of 0.45 and 0.7 is 0.575. The problem is the nature of normalization. Averaging adds things together, an associative operation, but not one which preserves normalization. The normalization is then left to the end.
+
+% Whether any of these considerations pose a problem would depend on who is doing the composition. If the intent maker is doing the composing, then they can make the judgment on whether a particular composition method preserves their intended semantics. However, if the machine is doing the composition, then we cannot know the semantics, and it's dangerous to use certain operations.
+
+This idealization may not work in practice. It may be better to have a representation, $R$, with which we can replace the second component of an intent with $S \rightarrow R$, which takes the current state and returns a proposition representation. We'd also have an evaluation function, $\text{eval} : R \rightarrow S \rightarrow \star \cup [0, 1]$, which takes a representation and a proposed state (filling in the variables of the proposition) and outputs a measure of satisfaction. Alternatively, we could assume that $I$ is an abstract type, and simply assume the existence of a function $\text{compile} : I \rightarrow S \rightarrow R$. This is likely closer to what is needed in reality, as optimizing over black-box functions is not practically possible. We cannot, for example, take a derivative, or some discrete analog, of a completely black-box function. This would limit us to unstructured optimization algorithms like evolutionary methods or stochastic search. In reality, we should always be able to reason about the stated preferences of the intent, which requires a first-order representation, rather than a black-box function. Such a representation would likely come in the form of an encoding for, for example, a weighted CSP.
+
+\subsection{Decomposition}
+
+We may ask when decomposition is possible. Generally, to facilitate decomposition in a semantically meaningful way, we need to know a thing or two about intents. Let's consider the case where the state space is decomposable into $S \cong S_1 \times S_2$. We would like to take a transition function of type $m : S \rightarrow N(S \times B)^B$ and turn it into two transition functions of type $m_1 : S_1 \rightarrow N(S_1 \times B_1)^{B_1}$ and $m_2 : S_2 \rightarrow N(S_2 \times B_2)^{B_2}$, respectively. This can be accomplished with two functions, $f_1 : B_1 \rightarrow B$ and $f_2 : B_2 \rightarrow B$, that cast batches for each machine. Additionally, we need functions $r_1 : B \rightarrow B_1$ and $r_2 : B \rightarrow B_2$ to get filter batches only from each machine; without these functions, the return batches of both machines would be the composite output batch. Using these, we'd have
+
+\begin{equation}
+    m_1 := \lambda s. N(- \times -)(\pi_1, r_1) \circ m(s) \circ f_1
+\end{equation}
+
+\begin{equation}
+    m_2 := \lambda s. N(- \times -)(\pi_2, r_2) \circ m(s) \circ f_2
+\end{equation}
+
+The key question at this point is what $f_1$ and $f_2$ should be. Conceptually, they should split batches of intents into sets that care about the different parts of the state. That is, for every batch in the input history, it should be provable that;
+
+\begin{align}
+    B \cong \{ i\ |\ \forall s_1, s'_1 \in S_1, s_{2a}, s'_{2a}, s_{2b}, s'_{2b} \in S_2 . \pi_2\ i((s_1, s_{2a}), (s'_1, s'_{2a})) = \pi_2\ i((s_1, s_{2b}), (s'_1, s'_{2b})) \} \\
+    + \{ i\ |\ \forall s_{1a}, s'_{1a}, s_{1b}, s'_{1b} \in S_1, s_{2}, s'_{2} \in S_2 . \pi_2\ i((s_{1a}, s_{2}), (s'_{1a}, s'_{2})) = \pi_2\ i((s_{1b}, s_{2}), (s'_{1b}, s'_{2})) \}
+\end{align}
+
+that is, each batch should be decomposable into a batch of intents that do not vary based on $S_1$, and a batch of intents that do not vary based on $S_2$. $f_1$ would then return the set of first things while $f_2$ would return the set of second things. This is necessary so that we may interpret each intent as either an intent over just $S_1$ or $S_2$.
+
+It, of course, may be easier to establish the existence of an $m_1, m_2$, such that $m = m_1 \times m_2$, rather than decomposing $m$ directly. This is likely the best way to approach decomposition using $\circ$ and $+$ as well.
+
+\subsection{Reputation Discussion}
+
+For our purposes, a reputation system is a method to weigh different intents. This allows us to give more or less importance to some intents. If an intent has a higher weight, then this should influence the solver to spend more effort to satisfy the intent.
+
+The simplest way to implement a reputation system is to simply assert the existence of a function $r : I \rightarrow [0, \infty)$. This can be used to scale the desire of each intent.
+
+We may seek to verify certain properties of the reputation system. For example, to ensure one cannot gain priority by spamming intents, we may have a function $\text{id} : I \rightarrow A$, assigning an identity (the type of which I've just called $A$) to each intent. We may have a theorem stating something like
+
+\begin{equation}
+    \forall a \in A. \forall s, s' \in S. \left( \sum_{i\ |\ \text{id}(i) = a \wedge \pi_2\ i\ s\ s' \neq \star} \pi_2\ i\ s\ s' \right) \leq 1
+\end{equation}
+
+This ensures the most weight a single identity can cause is 1, no matter how many intents they spam. Such identity content is outside the scope of an intent machine, however.
+
+\subsection{Example: Number Machine}
+
+To clarify this formulation on an example, let's attempt to create an intent machine where the state is just a number, and the intents describe preferences for the transition between numbers.
+
+For practical purposes, the state will necessarily be finite. We will assume that the number is an element of $\mathbb{N}$, that is, a natural number.
+
+To keep it simple, we will assume we have the same four intents at each step, desiring:
+
+\begin{enumerate}
+    \item The next state should be even.
+    \item The next state should be odd.
+    \item The next state should differ by 1 from the last.
+    \item The next state should be 1 or 2 greater than the last. If 2 greater, full score, if 1 greater, half score, if 0, no score.
+\end{enumerate}
+
+So the input stream is just a set of these 4 intents, repeated forever.
+
+We may formalize this as an ILP problem. To demonstrate this, we will use SCIP through Google OR-tools.
+
+\begin{betterpython}
+    from ortools.linear_solver import pywraplp
+\end{betterpython}
+
+To make boolean variables correspond to our desired propositions, we will use the ``Big M" method. For demo purposes, M does notneed to be that large;
+
+\begin{betterpython}
+    M = 1000
+\end{betterpython}
+
+The intents themselves can be formulated as functions that add constraints to the solver. In a more abstract setting, we may think of syntactic encodings of the constraints as $R$. For demo purposes, the constraints are added to the solver, and it's the booleans linked to the constraints that are returned. The scores are tied to the booleans themselves. We ensure that the total score of the booleans is between 0 and 1. This may not always be obvious as some booleans are exclusive and some are not. For this example, all booleans are exclusive, but, in general, such an encoding may be inefficient. The state, as a constant, is taken in as a constant argument, while a variable for the next state is taken as an argument so all the constraints can talk about the same next state.
+
+\begin{betterpython}
+    def even_constraint(last_state, next_state_var, solver):
+        n = solver.IntVar(0, solver.infinity(), 'n_even')
+        b = solver.BoolVar('b_even')
+        solver.Add(next_state_var - 2 * n <= M * (1 - b))
+        solver.Add(next_state_var - 2 * n >= -M * (1 - b))
+        return [(b, 1)]
+    
+    def odd_constraint(last_state, next_state_var, solver):
+        n = solver.IntVar(0, solver.infinity(), 'n_odd')
+        b = solver.BoolVar('b_odd')
+        solver.Add(next_state_var - 2 * n - 1 <= M * (1 - b))
+        solver.Add(next_state_var - 2 * n - 1 >= -M * (1 - b))
+        return [(b, 1)]
+    
+    def two_changes_constraint(last_state, next_state_var, solver):
+        b_2_greater = solver.BoolVar('b_2_greater')
+        b_1_greater = solver.BoolVar('b_1_greater')
+        b_no_change = solver.BoolVar('b_no_change')
+        
+        solver.Add(next_state_var - (last_state + 2) <= M * (1 - b_2_greater))
+        solver.Add(next_state_var - (last_state + 2) >= -M * (1 - b_2_greater))
+        solver.Add(next_state_var - (last_state + 1) <= M * (1 - b_1_greater))
+        solver.Add(next_state_var - (last_state + 1) >= -M * (1 - b_1_greater))
+        solver.Add(next_state_var - last_state <= M * (1 - b_no_change))
+        solver.Add(next_state_var - last_state >= -M * (1 - b_no_change))
+        
+        return [(b_2_greater, 1), (b_1_greater, 0.5), (b_no_change, 0)]
+    
+    def one_more_or_less_constraint(last_state, next_state_var, solver):
+        b1 = solver.BoolVar('b_one_more')
+        b2 = solver.BoolVar('b_one_less')
+    
+        solver.Add(next_state_var - (last_state + 1) <= M * (1 - b1))
+        solver.Add(next_state_var - (last_state + 1) >= -M * (1 - b1))
+        solver.Add(next_state_var - (last_state - 1) <= M * (1 - b2))
+        solver.Add(next_state_var - (last_state - 1) >= -M * (1 - b2))
+    
+        return [(b1, 1), (b2, 1)]
+\end{betterpython}
+
+These are close to the representation formulation involving $R$. Each takes, as an initial argument, $\text{last\_state}$, and produces a representation of the proposition in the form of a Python function that takes a variable representing the next state and a solver, and it returns a list of variables along with its weight. The analog of $R$ in these functions are the various statements added to $\text{solver}$. Due to the stateful nature of ortools, this cannot be made to look exactly like the ideal formulation, but hopefully, the connection is clear enough.
+
+The machine itself has essentially the same formulation as the theory; being a function taking a state and a batch of intents, represented as a dictionary mapping constraint names to functions and weights. These weights, which do not appear in the abstract intent machine description, are the output of a hypothetical reputation system dictating how important each constraint is. These will all be 1 for this demo. Note that these are unrelated to the weights returned by the intents themselves. These intents are then called to modify the solver state to include the new constraints. The sum of the booleans scaled by weight is then used as an objective function, and a new state, along with a list of satisfied intents is returned. There's also a 30-second timeout, but the demo takes only microseconds.
+
+\begin{betterpython}
+    def machine(state, constraints_dict):
+        solver = pywraplp.Solver.CreateSolver('SCIP')
+        if not solver:
+            raise Exception('SCIP solver not available.')
+        
+        solver.SetTimeLimit(30000)
+        
+        next_state_var = solver.IntVar(0.0, solver.infinity(), 'next_state_var')
+        
+        objective = solver.Objective()
+        objective.SetMaximization()
+        
+        bool_vars = {}  # Dictionary to store solver boolean variables
+        
+        for name, (constraint_func, weight) in constraints_dict.items():
+            for b, w in constraint_func(state, next_state_var, solver):
+                bool_vars[b] = name  # Store the constraint name
+                objective.SetCoefficient(b, w * weight)
+        
+        status = solver.Solve()
+        
+        total_objective = objective.Value()  # Get the total objective value
+        
+        satisfied_constraints = []
+        
+        if status in [pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE, pywraplp.Solver.ABNORMAL]:
+            new_state = next_state_var.solution_value()
+            for b in bool_vars.keys():
+                if b.solution_value() > 0.5:
+                    satisfied_constraints.append(bool_vars[b])  # Get the constraint name
+            return new_state, satisfied_constraints, total_objective
+        else:
+            return state, [], total_objective
+\end{betterpython}
+
+as a usage example, we can put all our constraints into the batch;
+
+\begin{betterpython}
+    constraints_dict = {
+        'even': (even_constraint, 1),
+        'odd': (odd_constraint, 1),
+        'two_changes': (two_changes_constraint, 1),
+        'one_more_or_less': (one_more_or_less_constraint, 1)
+    }
+\end{betterpython}
+
+we can then run
+
+\begin{betterpython}
+    new_state, satisfied, total_objective = machine(5.0, constraints_dict)
+    print(f"New state: {new_state}, Satisfied constraints: {satisfied}, Total Objective: {total_objective}")
+\end{betterpython}
+
+getting the output
+
+\begin{lstlisting}{python}
+    New state: 6.0, Satisfied constraints: ['even', 'two_changes', 'one_more_or_less'],
+    Total Objective: 2.4999999999999996
+\end{lstlisting}
+
+We may then implement a function to actually run the machine on a stream of batches;
+
+\begin{betterpython}
+    def run_machine_in_sequence(initial_state, list_of_constraints_dicts):
+        current_state = initial_state
+        output_states = []
+        all_satisfied_constraints = []
+    
+        for constraints_dict in list_of_constraints_dicts:
+            new_state, satisfied_constraints, total_objective = machine(current_state, constraints_dict)
+            output_states.append(new_state)
+            all_satisfied_constraints.append((satisfied_constraints, total_objective))
+            current_state = new_state  # Update the current state for the next iteration
+    
+        return output_states, all_satisfied_constraints
+\end{betterpython}
+
+This function will repeatedly stream batches from an input list and update the state accordingly. The history of states and satisfied constraints will then be outputted after the list of batches is exhausted. We can see the state evolves over time with
+
+\begin{betterpython}
+    run_machine_in_sequence(0, [constraints_dict for x in range(10)] )
+\end{betterpython}
+
+This is just going to repeat the batch with all 4 intents 10 times. It will output.
+
+\begin{lstlisting}
+    ([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+     [(['odd', 'two_changes', 'one_more_or_less'], 2.5),
+      (['even', 'two_changes', 'one_more_or_less'], 2.5),
+      (['odd', 'two_changes', 'one_more_or_less'], 2.5),
+      (['even', 'two_changes', 'one_more_or_less'], 2.5),
+      (['odd', 'two_changes', 'one_more_or_less'], 2.4999999999999996),
+      (['even', 'two_changes', 'one_more_or_less'], 2.4999999999999996),
+      (['odd', 'two_changes', 'one_more_or_less'], 2.5),
+      (['even', 'two_changes', 'one_more_or_less'], 2.5),
+      (['odd', 'two_changes', 'one_more_or_less'], 2.4999999999999996),
+      (['even', 'two_changes', 'one_more_or_less'], 2.4999999999999996)])
+\end{lstlisting}
+
+It never seeks to satisfy the full ``two-greater" constraint. Doing so would only gain 0.5 while losing 1 from not satisfying the one-more-or-less constraints. We can, at this point, create arbitrary streams of batches to get more interesting histories, if desired.
+
+

@@ -1,0 +1,33 @@
+ \documentclass[
+    conference,
+]{art}
+
+\input{metadata.tex}
+\input{macros.tex}
+
+\usepackage{wasysym}
+
+\tikzset{
+block/.style={rectangle, draw, 
+text width=4.2em, text centered},
+line/.style={draw, -latex'},
+int/.style={circle, draw, fill=blue!20},
+int2/.style={circle, draw, fill=yellow!40},
+int3/.style={circle, draw, fill=black!10},
+every picture/.append style={transform shape, scale=0.85}
+}
+\tikzstyle{arrow} = [thick,->,>=stealth]
+
+\begin{document}
+
+\maketitle
+
+\input{intro.tex}
+\input{abstract.tex}
+\input{barter.tex}
+\input{appendix.tex}
+\input{acknowledgements.tex}
+
+\bibliography{ref.bib}
+
+\end{document}

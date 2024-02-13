@@ -1,0 +1,627 @@
+\section{Barter Exchange preliminaries}\label{sec:barter}
+
+\subsection{Introduction}
+
+One of the goals of Anoma is to enable \textit{barter}, where different users express their preferences for \textit{resource} exchanges, discover counterparties, and execute these exchanges. 
+We will now analyze how we can instantiate intent machines, or approximations thereof, which fulfill the requirements of a resource bartering system.
+
+Before we introduce definitions of different \textit{bid machines}, we first describe \textit{barter double auctions}\footnote{\cite{tagiew2009barter}} for the Anoma Abstract Resource machine, which is the type of \textit{barter exchange}\footnote{For more background on (robust) barter exchange, see chapter 6 of \cite{pub:77183}} we want to implement.
+
+Specifically in our setting, \textit{agents} express \textit{demands} and \textit{offers} of Anoma \textit{resource} bundles, which are specified by \textit{predicates}, with \textit{solvers} acting as \textit{auctioneers}, matching demand and offer bundles of multiple agents according to a given \textit{mechanism}.
+
+\subsection{Resource Model}
+Let us first introduce a simplified version of the Anoma resource model\footnote{\cite{khalniyazova_2024_10498991}} to lay out the objects of interest in the barter. This introduction is reduced to the features relevant to the characterization we wish to analyze here.
+\begin{itemize} 
+    \item The \textit{set of all possible resources} $R$ is induced by a specific hash function $h$, containing one resource per element of the codomain of $h$.
+    \item \textit{Resources} are the elements of the state $S$ on which a bid machine operates. It consists of the set of created resources $S_+ \subseteq R $ and the set of consumed resources $S_- \subseteq R$ with $S_+ \cap S_- = \varnothing$ and $S = (S_+, S_-)$. % Ideally true, but not necessarily if you have corrupt controllers. Omitted for simplicity.
+    \item A resource is added to $S_+$ by creating it, which is done by instantiating it as a data structure which fulfils the predicate from the resource kind (see below). One of these requirements could be fulfilling the requirements to consume a resource of the same kind.
+    \item When a resource is consumed (which must only happen when the requirements of its kind are fulfilled), it moves from $S_+$ to $S_-$. Resources can only be consumed once, and they cannot move back to $S_+$. 
+    \item A \textit{transaction} implements a state transition by consuming and creating sets of resources $TX: S \to S, TX \in T$.
+    \item A $TX$ must be \textit{balanced}, that means, for each resource kind, the number of resources it consumes must equal the number of resources it creates. A resource that is not balanced is \textit{unbalanced}. 
+    \item Resources $r = (k, v, c) \in R$ have the following relevant properties:
+    \begin{itemize} 
+        \item A \textit{kind} $k$, which determines restrictions on $TXs$ this resource can be part of, e.g. mandating which resources can and need to be consumed or created in the $TX$.  It can also require signatures $in \mathbb{S}$, which depend on secret information; $p: \mathcal{P}(T) \times  \mathcal{P}(\mathbb{S}) \to \mathbb{B}$.
+        \item A \textit{value} $v$, which can contain arbitrary application data (e.g. a public key of a user controlling a particular resource).
+        \item A \textit{controller} $c$, which denotes the controller responsible for this resource. The controller implements a state machine (e.g. a database) which tracks the state of this resource, and must sign over any creation or consumption of it in order for the change to be considered valid.
+    \end{itemize}
+\end{itemize}
+
+In practice, the resource system would be used as follows: A \textit{resource kind} would model a \textit{type of object}, instances of which are fungible with each other, e.g. identical teapots. Each \textit{resource} would indicate a \textit{specific} teapot and its properties, e.g. which user in the system currently owns it. When the teapot is transferred, the resource representing it is consumed, and a new resource, indicating the new owner, is created.
+
+\subsection{Bids}
+% TODO: Imaginiary bread and cheese in the village example?
+
+To be able to describe barter exchanges over resources, we need to formulate \textit{barter intents}, which are usually called \textit{bid} in the auction literature. In a case where a single good is up for auction in exchange for money (e.g. a \href{https://en.wikipedia.org/wiki/Vickrey_auction}{sealed-bid second-price auction}) they indicate what the party submitting is, is willing to maximally pay to acquire the good. This generalizes to vector valued bids in cases where multiple items are up for auction.
+
+For the case of two sided barter auctions, which we want to enable, we need to generalize further. Since the items to be auctioned are aggregated from the bids the participants submit, the simplest possible bid type would consist of an offer vector, indicating how many of which item type an agent is putting into the pool, and a demand vector, indicating how many of which item types they want to receive in return for that. This would still be of limited expressivity, since there is no way to rank preferences or to state alternative, but mutually exclusive bids. Thus we introduce bids using predicates to indicate whether a demand is met and what shapes the offer could take in this case.
+
+A $bid$, as used in our model, is defined as follows:
+
+\begin{itemize}
+    \item An \textit{offer} side indicates which resources an agent is willing to give up via a predicate $p_d$, and their preferences for ranking options via a utility function $u_d$.
+    \item A \textit{demand} side indicates which resources an agent is hoping to receive via a predicate $p_o$, and their preferences for ranking options via a utility function $u_o$.
+    \item A set of \textit{offer resources} $R_o$ which can be used to the offer side, 
+\end{itemize}
+
+The predicates have the shape $p : \mathcal{P}(R) \to \mathbb{B}$, and range over bundles of resources.
+The utility functions have the shape $u : R \to [0, 1] \subset \mathbb{Q}$.\footnote{If predicates and utility functions are not rolled into one, we gain flexibility: e.g., a user could state predicates that get satisfied, with the utility of the new state still being zero.}.
+
+Putting it all together, we get
+\begin{equation}
+    bid = (p_d, u_d, p_o, u_o, R_o)
+\end{equation}
+
+
+\subsection{Bids implemented by transactions}
+% TODO: whats the difference between offer and demand side. Formulate p_o, R_o connection within bids and within TXs
+Every bid, $p_d, p_o, R_o$ implies a set of (unbalanced)  potential $TXs$, since only the offer side is given. A set of matching bids, $b_i$, is where the offer and demand sides of every $b_i$ are met, implying a balanced $TX$, which can be directly derived from the bid set. Any balanced $TX$ that contains independent subsets of matching bids can be decomposed into smaller $TXs$ corresponding to the independent subsets of matching bids. These smaller independent transactions can all be executed in parallel. We call a set of balanced $TXs$ derived from a set of matching bids a \textit{barter exchange} $BX$. 
+
+\subsection{Bid $\Leftrightarrow$ Intent correspondence}
+The above is compatible with our definition for Intents $I$, \eqref{eq:intent},
+as follows: 
+
+\begin{itemize}
+    \item The set of $TXs$ implied by $p_d, p_o, R_o$ from a single $bid$ is a transition function: $t: S \to S := s \mapsto s''$ 
+    \item $p_d, p_o$ imply a predicate $p = p_d \land p_o$ which rejects any transition which is incompatible with the above $t$: $p : S \times S \to \mathbb{B}$
+    \item $u_d, u_o$ give a weighting $w(x) = u_d(x) + u_o(x)$ (renormalized) for the state transitions compatible with $t$, not rejected by $p$: $w: S \times S \to [0, 1]$
+\end{itemize}
+
+Putting them all together, we get:
+\begin{equation}
+    \begin{aligned}  
+    bid &= (t, \lambda s.\ \text{if}\ p(s)\ \text{then}\ w(s)\ \text{else}\ \star),\\
+    bid &: (S \rightarrow S) \times (S \times S \rightarrow \star \cup [0, 1])
+    \end{aligned}
+\end{equation}
+
+\subsubsection{Bid examples}
+
+The predicates on both sides can be used to specify offer/demand pairs of arbitrary bundles of resources, for example:
+
+\begin{itemize}
+    \item Single resources on both sides
+    \item Dependent bundles, e.g. if an agent wants a resource of kind A only if they can acquire one of kind B or C at the same time
+\end{itemize}
+
+The demand and offer predicate together specify a set of accepted state transitions, with the utility function ranking them. Outside of satisfying the predicates, the auction mechanism $M$ executed by the auctioneer can be chosen freely. 
+
+\subsubsection{Bid composition} Multiple bids can be composed into a single bid, for example like this:
+\begin{equation} 
+    \begin{aligned}
+    bid_{1\land2} &= ((p_{d_1} \land p_{d_2}), (u_{d_1} + u_{d_2}), (p_{o_1} \land p_{o_2}), (u_{o_1} + u_{o_2}), (R_{o_1} \cup R_{o_2})) \\
+    \end{aligned}
+\end{equation}
+
+With $u_i + u_j \Rightarrow u_i(x) + u_j(x)$. 
+More complex dependencies of bids can be expressed via predicates, e.g. "The offer from $bid_1$ is only valid if the demand from $bid_2$ is fulfilled in the same $TX$ or $BX$.
+
+\subsection{Roles}
+We also have the following roles:
+
+% TODO: Show connection: solver definition to auctioneer
+\begin{itemize}
+    \item A group of \textit{Agents}, which submit bids $b = \{bid_1, \dots, bid_n\}$ to an auctioneer.
+    \item One or several \textit{Auctioneers}\footnote{these auctioneers act as solvers}, which receive the bids and match subsets of these according to their offer and demand sides. The matching maximizes a metric given by the auctioneer. From this, we derive a barter exchange $BX$ and submit it to the controller for ordering. The auctioneer can submit $BX$ containing a single $TX$ as soon as a matching set of bids is found, or wait until it has processed more or all of the batch of bids, submitting a larger $BX$.
+    %A $TX$ is be derived per independent subset. This set of \textit{ $TX$ candidates} is submitted to the controller. Details of this process are determined by an auction mechanism $M$.
+    \item One\footnote{For now, we assume all resources share the same controller, so only a single one is used. In general, a controller is only responsible for the subset of state containing resources which reference it.} \textit{Controller}, which manages state and orders submitted $BX$ candidates. Time is sliced by discrete \textit{ticks}, during which $TX$ candidates (contained in the $BXs$ and are balanced) are arranged in a partial order, by order of submission to the controller, depending on some ordering mechanism. The end of the current tick and the beginning of the next is delineated by the executor performing a state update.
+    \item One \textit{Executor}, which executes candidate $TXs$. This is done by applying the state updates contained in the $TX$ candidates which are valid at execution time, as well as computing and publishing a cumulative state update. Details of this behavior are determined by an execution mechanism $E$. % This is a simplification, Typhon works as follows: It orders transaction candidates, and executes them, updating the state. The execution is at least serializable, which is to say "equivalent" in some sense, to running the transactions one at a time, in sequence. There is no particular notion of "Tick" or "cumulative state update."
+\end{itemize}
+
+
+
+\section{Bid Machines}\label{sec:bid-machines}
+
+Let us now introduce two types of bid machines: a restricted one, which instantiates an intent machine directly, and a more general one, which does not. The case distinction we need to make depends on when and where the auctions are computed. 
+
+\begin{figure}[!h]
+\centering
+\tikz{
+    \node[int] (M) {M};
+    \node[above = 0.8em of M] (auct-role) {Auctioneer};
+    \node[block, fit=(M) (auct-role), draw] (auctioneer) {};
+    
+    \node[int, left = 7em of M] (s) {s};
+
+    \node[below = 5em of s] (agent-role) {Agents};
+    \node[int, below = 0.8em of agent-role] (b) {b};
+    \node[block, fit=(b) (agent-role), draw] (agents) {};
+
+    \node[circle, draw, right = 5em of M] (dots) {$\dots$};
+    
+    \node[int, right = 5em of dots] (E) {E};
+    \node[above = 0.8em of E] (exec-role) {Executor};
+    \node[block, fit=(E) (exec-role), draw] (executor) {};
+
+    \node[int, right = 7em of E] (s3) {s$'''$};
+
+    \node[below = 5em of s3] (agent-role) {Agents};
+    \node[int, below = 0.8em of agent-role] (b2) {b$''$};
+    \node[block, fit=(b2) (agent-role), draw] (agents) {};
+
+    \node[above = 4em of dots] (bm-role) {Bid Machine};
+    \node[block, fit= (auctioneer) (executor) (bm-role), draw, inner sep = 1.5em] () {};
+
+    \node[above = 0.8em of s] (ctrl-role) {Controller};
+    \node[block, fit=(ctrl-role) (s), draw] () {};
+    
+    \node[above = 0.8em of s3] (ctrl-role) {Controller};
+    \node[block, fit=(ctrl-role) (executor) (s3), draw] () {};
+
+    \draw[arrow] (s) -- (M);
+    \draw[arrow] (b) -- (M);
+    \draw[arrow] (M) -- (dots);
+    \draw[arrow] (dots) -- (E);
+    \draw[arrow] (E) -- (s3);
+    \draw[arrow] (E) -- (b2);
+}
+\caption{External bid machine interface, internal decomposition details omitted.}
+\end{figure}
+\vspace{1em}
+
+% TODO: Clarify derivation includes choice amongst possible BX but could just be done by M, to simplify. Maybe add a footnote that b' does not execute directly.
+We have the following objects:
+\begin{itemize}
+    \item $s$, the state of the underlying resource machine prior to the auction
+    \item $b$, a batch of bids by the agents
+    \item $M$, the concrete auction mechanism which determines the selection of $b'$
+    \item $b'$, the subset of bids chosen by an auctioneer
+    \item $BX$ a set of $TXs$ derived from $b'$
+    \item $s'$, the state after auction computation (only in controller-dependent case, see below)
+    \item $s''$, the state prior to execution
+    \item $E$, the execution mechanism, which determines details of the state update, implemented by $BX$
+    \item $s'''$, the new state after $s''$ was updated by $E$
+    \item $b''$, the subset of $b'$ which was not taken into account when updating to the new state $s'''$, i.e. the bids contained in failed $TXs$, as well as unmatched ones
+\end{itemize}
+
+The \textbf{bid machine is defined by $M$ and $E$}, both of which are determined by decisions which happen out of band of this abstraction level.
+
+$M$ implements a bartering auction over bids, its specific parameters determining its properties, e.g., regarding robustness or the choice of metric to maximize. 
+$E$ implements an execution mechanism for barter exchanges, with its parameters determining how execution and selection between conflicting $BX$ are handled.
+Both of the above can depend on reputation-tracking relationships between agents, auctioneers, and controllers.
+
+\subsection{Auction computed on the controller}\label{sec:controller-dependent-auction}
+
+Let us start with a restricted setting, in which the auction is computed on the controller, which means the auctioneer and executor have access to the current state of the system at all times. 
+
+\begin{figure}[h]
+\tikz{
+    \node[int] (M) {M};
+    \node[above = 0.8em of M] (auct-role) {Auctioneer};
+    \node[block, fit=(M) (auct-role), draw] (auctioneer) {};
+    
+    \node[int, left = 5em of M] (s) {s};
+
+    \node[below = 5em of s] (agent-role) {Agents};
+    \node[int, below = 0.8em of agent-role] (b) {b};
+    \node[block, fit=(b) (agent-role), draw] (agents) {};
+
+    \node[int, right = 5em of M] (s1) {s$'$};
+    \node[circle, draw, right = 5em of s1] (dots) {$\dots$};
+    \node[int, right = 5em of dots] (s2) {s$''$};
+
+    \node[int, right = 5em of s2] (E) {E};
+    \node[above = 0.8em of E] (exec-role) {Executor};
+    \node[block, fit=(E) (exec-role), draw] (executor) {};
+
+    \node[int, right = 5em of E] (s3) {s$'''$};
+
+    \node[below = 5em of s3] (agent-role) {Agents};
+    \node[int, below = 0.8em of agent-role] (b2) {b$''$};
+    \node[block, fit=(b2) (agent-role), draw] (agents) {};
+
+    \node[above = 1.5em of dots] (ctrl-role) {Controller};
+    \node[block, fit=(auctioneer) (executor) (ctrl-role) (s) (s1) (s2) (s3), draw, inner sep = 1.5em] (controller1) {};
+
+    \draw[arrow] (s) -- (M);
+    \draw[arrow] (b) -- (M);
+    \draw[arrow] (M) -- (s1) node[int, midway, circle, draw]{\small $BX$};
+    \draw[arrow] (s1) -- (dots);
+    \draw[arrow] (dots) -- (s2);
+    \draw[arrow] (s2) -- (E);
+    \draw[arrow] (E) -- (s3);
+    \draw[arrow] (E) -- (b2);
+}
+\caption{Information flow in a controller-dependent Bid Machine.}
+\end{figure}
+\vspace{1em}
+
+In this setting, $M$ and $E$ each instantiate an intent machine on their own:
+\begin{equation}\label{eq:bm}
+    \begin{aligned}
+    M(s, b) &= (s', \varnothing) \\
+    E(s'', \varnothing) &= (s''', b'')&
+    \end{aligned}
+\end{equation} 
+
+\subsubsection{Controller dependent Bid Machine $\Leftrightarrow$ Intent Machine correspondence}\label{sec:controller-dependent-bid-machine}
+
+To instantiate an intent machine according to our definition in \eqref{eq:M-monad}, the composition needs to happen in the following way:
+
+\vspace{1em}
+\noindent\textbf{Auctioneer:}
+\begin{itemize}
+    \item reads $b$
+    \item reads $s$
+    \item computes matching $b'$, according to $M$
+    \item adds $b'$ to the state, not touching any other part of $s$
+    \item outputs $s'$ as computed above, and an empty batch
+\end{itemize}
+
+\vspace{1em}
+\noindent\textbf{Executor:}
+\begin{itemize}
+    \item ignores its input batch
+    \item reads the state $s''$ which includes $b'$
+    \item deletes $b'$ from the state
+    \item executes according to $E$, updating the state to $s'''$
+    \item outputs $b''$, containing all bids which were not included in $BX$
+\end{itemize}
+
+\vspace{1em}
+
+\noindent\textbf{Controller:}
+\begin{itemize}
+    \item only a single one exists
+    \item implements the roles of auctioneer and executor
+    \item If the computation of $M$ and execution with $E$ happen during the same tick, with $M$ being computed at post-ordering time, then $s' = s''$. This is the recommended setup. If $M$ is computed a previous tick, state might have changed for reasons outside of this bid machine between $s'$ and $s''$.
+\end{itemize}
+
+%note: Case distinction by time
+%note: Could request state as bids from controller if not on it
+\subsection{Auctions computed independently of the controller}
+
+\begin{figure}[H]
+\tikz{
+    \node[int] (b1) {$b_1$};
+    \node[above = 0.8em of b1] (agent-role1) {Agents 1};
+    \node[block, fit=(b1) (agent-role1), draw] (agents1) {};
+
+    \node[int, below = 4em of b1] (s1) {$s_1$};
+
+    \node[int, right = 4em of b1] (M1) {$M_1$};
+    \node[right = 1.5em of M1] (m1mid) {};
+    \node[above = 1.8em of m1mid] (auct-role1) {Auctioneer 1};
+    \node[int, right = 3em of M1] (b11) {$b_1'$};
+    \node[block, fit=(M1) (b11) (auct-role1), draw, inner xsep=1.5em] (auctioneer1) {};
+
+    \node[int2, right = 4em of s1] (s2) {$s_2$};
+
+    \node[int2, below = 9em of s2] (b2) {$b_2$};
+    \node[above = 0.8em of b2] (agent-role2) {Agents 2};
+    \node[block, fit=(b2) (agent-role2), draw] (agents2) {};
+
+    \node[int, right = 4em of s2] (s12) {$s_1''$};
+    \node[right = 5em of s12] (exec1) {};
+    \node[int, right = 6em of exec1] (s13) {$s_1'''$};
+
+    \node[int2, right = 4em of s13] (s22) {$s_2''$};
+    \node[right = 5em of s22] (exec2) {};
+    \node[int2, right = 5em of exec2] (s23) {$s_2'''$};
+
+    \node[int2, right = 5em of b2] (M2) {$M_2$};
+    \node[right = 1.5em of M2] (m2mid) {};
+    \node[above = 1.8em of m2mid] (auct-role2) {Auctioneer 2};
+    \node[int2, below = 9em of s22] (b21) {$b_2'$};
+    \node[block, fit=(M2) (b21) (auct-role2), draw, inner xsep=1.5em] (auctioneer2) {};
+
+    \node[int3, below = 1em of exec1] (E1) {E};
+    \node[above = 0.8em of E1] (exec-role1) {Executor};
+    \node[block, fit=(E1) (exec-role1), draw] (executor1) {};
+
+    \node[int3, below = 1em of exec2] (E2) {E};
+    \node[above = 0.8em of E2] (exec-role2) {Executor};
+    \node[block, fit=(E2) (exec-role2), draw] (executor2) {};
+
+    \node[int, above = 4em of s13] (b12) {$b_1''$};
+    \node[above = 0.8em of b12] (agent-role12) {Agents 1};
+    \node[block, fit=(b12) (agent-role12), draw] (agents12) {};
+    
+    \node[int2, below = 9em of s23] (b22) {$b_2''$};
+    \node[above = 0.8em of b22] (agent-role22) {Agents 2};
+    \node[block, fit=(b22) (agent-role22), draw] (agents22) {};
+
+    \node[below = 2em of s1] (ctrl-role) {Controller};
+    \node[block, fit = (s1) (s12) (s13) (s2) (s22) (s23) (executor1) (executor2), draw, inner sep = 1.5em] (controller) {};
+
+    \draw[arrow] (s1) -- (M1);
+    \draw[arrow] (b1) -- (M1);
+    \draw[arrow] (M1) -- (b11);
+    \draw[arrow] (b11) -- (E1) node[int, near start]{\small $BX$};
+    \draw[arrow] (s12) -- (E1);
+    \draw[arrow] (E1) -- (s13);
+    \draw[arrow] (E1) -- (b12);
+
+
+    \draw[arrow] (s2) -- (M2);
+    \draw[arrow] (b2) -- (M2);
+    \draw[arrow] (M2) -- (b21);
+    \draw[arrow] (b21) -- (E2) node[int2, near start]{\small $BX$};
+    \draw[arrow] (s22) -- (E2);
+    \draw[arrow] (E2) -- (s23);
+    \draw[arrow] (E2) -- (b22);
+
+    \draw[arrow] (s1) -- (s2) node[midway, circle, draw, fill=white]{$\dots$};
+    \draw[arrow] (s2) -- (s12) node[midway, circle, draw, fill=white]{$\dots$};
+    \draw[arrow] (s13) -- (s22) node[midway, circle, draw, fill=white]{$\dots$};
+}
+\vspace{2em}
+\caption{Information flow of interleaved controller independent Bid Machines.}
+\label{fig:controller-independent}
+\end{figure}
+\vspace{1em}
+
+In the given context, none of the entities $M$, $E$, or any individual bid machine instantiate an intent machine.
+
+\begin{equation}
+    \begin{aligned}
+    M(s, b) &= (\varnothing, b') \\
+    E(s'', b') &= (s''', b'')&
+    \end{aligned}
+\end{equation} 
+
+In \cref{fig:controller-independent}, we can see two off-controller auctions $A_1$ (blue objects) with $\{b_1, b_1', b_1'', M_1, s_1, s_1', s_1'', s_1'''\}$ and $A_2$ (yellow objects) with $\{b_2, b_2', b_2'', M_2, s_2, s_2', s_2'', s_2'''\}$, sharing the same, single executor and $E$, which runs on a single controller\footnote{The roles of Agents 1+2, as well as Auctioneers 1+2 \textit{could} in practice be implemented by the same entities.}.
+
+\noindent\textbf{Auctioneers:}
+\begin{itemize}
+    \item read $b_{1,2}$
+    \item read $s_{1,2}$
+    \item compute matching $b_{1,2}'$, according to $M_{1,2}$
+    \item output $b_{1,2}'$ including derived $TXs$ as computed above and no state
+\end{itemize}
+
+\vspace{1em}
+\noindent\textbf{Executor:}
+\begin{itemize}
+    \item reads $b_{1,2}'$
+    \item reads the state $s_{1,2}''$
+    \item orders any $BXs$ derived from incoming bids including $b_{1,2}'$
+    \item executes $BX$, according to $E$ updating the state to $s_{1,2}'''$
+    \item outputs $b_{1,2}''$, containing all bids which where not included in execution and $s_{1,2}'''$
+\end{itemize}
+
+\vspace{1em}
+\noindent\textbf{Controller:}
+\begin{itemize}
+    \item only a single one exists
+    \item implements the only executor
+    \item at all points marked with $\dots$, arbitrary things can happen to the state due to other transactions being executed
+    \item Interleaved operation is the most general case, but if $s_1'' = s_2''$ when $b_1$ and $b_2$ are submitted, both auctions happen during the same tick. Then $b_1'$ and $b_2'$ are both taken into account when ordering $BXs$. After execution $s_1''' = s_2'''$.
+\end{itemize}
+
+\subsubsection{Controller independent Bid Machines $\Leftrightarrow$ Intent Machine correspondence}
+
+This generalizes to arbitrary numbers of agent sets and auctioneers, indexed by $i \in \mathbb{N}$, sets of bids $\mathcal{B} =\{b_1, \dots, b_n\}$ and states $\mathcal{S} =\{s_1, \dots, s_n\}$, with $\mathcal{B'}, \mathcal{B''}, \mathcal{S'}, \mathcal{S''}, \mathcal{S'''}$ analogously. We assume a total ordering of all elements of the state sets, but their indices are independent of their position in the order, instead denoting which bid machine they belong to. In general, agent sets do not have to be disjoint.
+
+This setup only fulfills our definition of intent machine if we take:
+\begin{equation}
+    \begin{aligned}
+        b &= b_1 \cup \dots \cup b_n \\
+        b'' &= b_1'' \cup \dots \cup b_n'' \\
+        s &= \min \mathcal{S} \quad \text{where min is first state in the set}\\
+        s''' &= \max \mathcal{S'''} \quad \text{where max is last state in the set}\\
+        E &\circ M(s, b) = (s''', b'')\\
+    \end{aligned}
+\end{equation}
+As such, \textbf{it does not enable any internal decomposition into intent machines}. A refined notion that enables decomposition of this general setting will be the subject of a subsequent publication. 
+
+
+%If bids and state come in before the same BX they are simultaneous.
+%Agents 1 and 2 can have overlap.
+%There is only one executor.
+
+
+
+
+%\section{Intent machine correspondence}
+
+
+% We will elaborate on a refinement for the decomposition in this more general case in a separate report.
+
+%\subsubsection{Pre-ordering time / controller independent}\label{sec:pre-ordering-auction}
+%Auctioneers can act independently of controllers by aggregating bids, computing a $TX$ and submitting it to controllers for validation. In this setting there are no guarantees that all resources of the $TX$ are available at execution time, since the auctioneer does not have access to the state changes during the computation of the auction. 
+%In exchange for this downside, this setting provides increased flexibility: Multiple auctioneers with different mechanisms could run in parallel and auction computation is not constrained by controller infrastructure. As mentioned above, bid machines of this type do not instantiate intent machines directly. 
+
+%Rather, auctions in this setting could be seen as computing potential exchanges similarly to speculative execution, branching off some known state, with branches incompatible with canonical state at merge-time being discarded.
+
+%\subsubsection{Post-ordering time / controller dependent}\label{sec:post-ordering-auction}
+%An auction could also be run by a controller at post-ordering time. This way, the controller/auctioneer can ensure to only compute $TXs$ which are guaranteed to execute, since all the resources will be available at execution time. This setting instantiates intent machines. It composes cleanly, giving composed bid machines which are also composed intent machines.
+
+\subsection{Composition of Bid Machines}
+There are two different ways to compose auctions in our model.
+
+\subsubsection{Sequential composition}
+
+\begin{figure}[!h]
+\centering
+\tikz{
+    \node[int] (BM1) {$\dots$};
+    \node[above = 0.8em of BM1] (bm-role) {Bid Machine 1};
+    \node[block, fit=(BM1) (bm-role), draw] (bid-machine1) {};
+    
+    \node[int, left = 5em of BM1] (s1) {$s_1$};
+
+    \node[int, below = 5em of s1] (b1) {$b_1$};
+    \node[above = 0.8em of b1] (agent-role1) {Agents 1};
+    \node[block, fit=(b1) (agent-role1), draw] () {};
+    
+    \node[int, right = 5em of BM1] (s13) {$s_1'''$};
+    \node[int2, right = 4em of s13] (s2) {$s_2$};
+    
+    \node[int, below = 5em of s13] (b12) {$b_1''$};
+    \node[int2, right = 4em of b12] (b2) {$b_2$};
+    \node[right = 2em of b12] (bm-anchor) {};
+    \node[above = 1.8em of bm-anchor] (bm-role2) {Bid Machine 1};
+    \node[block, fit=(b12) (b2) (bm-role2), draw, inner xsep = 1.5em] () {};
+
+    \node[int, below = 3em of b12] (b122) {$b_1''$};
+    \node[below = 0.8em of b122] (agent-role2) {Agents 1};
+    \node[block, fit=(b122) (agent-role2), draw] (report1) {};
+    
+    \node[int2, right = 5em of s2] (BM2) {$\dots$};
+    \node[above = 0.8em of BM2] (bm-role2) {Bid Machine 2};
+    \node[block, fit=(BM2) (bm-role2), draw] (bid-machine2) {};
+
+    \node[int2, right = 7em of BM2] (s23) {$s_2'''$};
+    
+    \node[int2, below = 5em of s23] (b22) {$b_2''$};
+    \node[above = 1em of b22] (bm-role3) {Bid Machine 1};
+    \node[block, fit=(b22) (bm-role3), draw] () {};
+
+    \node[int2, below = 3em of b22] (b222) {$b_2''$}; 
+    \node[below = 0.8em of b222] (agent-role3) {Agents 1};
+    \node[block, fit=(b222) (agent-role3), draw] (report2) {};
+
+    \draw[arrow] (s1) -- (BM1);
+    \draw[arrow] (b1) -- (BM1);
+    \draw[arrow] (BM1) -- (s13);
+    \draw[arrow] (BM1) -- (b12);
+    \draw[arrow] (b12) -- (b122);
+    
+    \draw[thick] (s13) -- (s2) node[midway, circle, draw, fill=white]{$=$};
+    \draw[thick] (b12) -- (b2) node[midway, circle, draw, fill=white]{$=$};
+    \draw[arrow] (s2) -- (BM2);
+    \draw[arrow] (b2) -- (BM2);
+    \draw[arrow] (BM2) -- (s23);
+    \draw[arrow] (BM2) -- (b22);
+    \draw[arrow] (b22) -- (b222);
+}
+\caption{Sequential composition of two barter exchanges.}
+\end{figure}
+\vspace{1em}
+
+The first bid machine reads $s_1, b_1$ at $t_1$, internally computes a matching with $M_1$ and executes with $E_1$, returning $s'''_1$ and $b''_1$. In turn, $s'''_1$ and $b''_1$ get fed into the next bid machine with $s_2 = s'''_1$ and $b_2 \subseteq b''_1$. In general, $s_2$ could also happen at any point after $s'''_1$ is returned, with arbitrary state changes happening in between.
+
+Here we do not care about whether the auctions are computed in the controller dependent (in which $M$ writes state for $E$ to read at $\dots$ time), or independent setting (in which $M$ passes $b'$ directly to $E$), since the only relevant objects being passed around are state $s$ and bids $b$, and only before the start of an auction and after the end of execution. 
+
+Choosing the bids which auctioneers hand on is up to them. The choice of internal mechanisms $M_i$ and exchanges $E_i$ and their behavior under composition will inform their strategies. We will elaborate on these game theory and mechanism design questions in further publications.
+
+If auctioneers collate bids from different sets of agents before forwarding them, any $b''$ need to be split up and reported to the correct agents in the end.
+
+% Same for Mechanism of cooperative Auctioneer
+
+\subsubsection{Parallel composition}
+Parallel composition means running the bid machine on a union (of subsets of) the bids received by bid machines during one tick of a given controller. For this, we need to do parallel composition of the auctioneers and executors individually. Composing executors in parallel means all executors are collapsed into a single one\footnote{This can happen by every executor delegating to the same executor. Or, since in practice, controllers and executors will often be implemented by consensus providers, the collapsing could be done e.g. via spinning up a chimera chain (\href{https://anoma.net/blog/chimera-chains}{blog post}).}
+
+For auctioneers we need to characterize a spectrum of cooperation with three axes, the specific parameters of which are decided upon by external governance.
+
+The first axis is \textbf{bid disclosure}, with the following bounding cases:
+\begin{itemize}
+    \item Full mutual bid disclosure: All auctioneers disclose each other all bids received during the current tick.
+    \item No mutual disclosure.
+\end{itemize}
+
+The second axis is \textbf{selection of bids} to search over, with the following bounding cases:
+\begin{itemize}
+    \item Full selection cooperation: All auctioneers coordinate the selection of bids to search over.\footnote{This does not necessarily mean agreeing on a single set, to search together. They could, e.g. agree on a partition and search individually, but the fact that it is coordinated is relevant.}
+    \item No selection cooperation: Every auctioneer selects bids independently.
+\end{itemize}
+
+The third axis is the \textbf{choice of mechanism $M$}, which is applied to the set of bids, to search for $BXs$:
+\begin{itemize}
+    \item Full mechanism cooperation: All auctioneers coordinate on the mechanism(s) used.\footnote{They could either pick one mechanism and trust one auctioneer to execute it, potentially verifying the result. Other options are to execute a single mechanism in some distributed fashion, or coordinate on mechanisms each party independently executes.}
+    \item No selection cooperation: Every auctioneer selects bids independently.
+\end{itemize}
+
+\vspace{1em}
+
+For simplicity of the following diagram, we assume $b_1, b_2$, have been read from the agents in the beginning and $b''_1, b''_2$ are reported to the agents in the end. Further, let $\dot{b_i} \subseteq b_i$ be the bids an agent shares with another.
+
+
+\begin{figure}[!h]
+\centering
+\tikz{
+    \node[int] (b1) {$b_1$};
+    \node[int, right = 3em of b1] (b1-union) {$b_1 \cup \dot{b_2}$};
+    \node[int, right = 3em of b1-union] (M1) {$M_1$};
+    \node[int, right = 3em of M1] (b11) {$b_1'$};
+    \node[above = 1em of b1-union] (auct-role1) {Auctioneer 1};
+    \node[block, fit=(M1) (b1) (b1-union) (b11) (auct-role1), draw, inner sep=0.5em] (auctioneer1) {};
+    
+    \node[below = 6em of b1] (s1) {};
+
+    \node[int3, right = 7em of s1] (s) {$s_{1/2}$};
+
+    \node[int2, below = 12em of b1] (b2) {$b_2$};
+    \node[int2, right = 3em of b2] (b2-union) {$b_2 \cup \dot{b_1}$};
+    \node[int2, right = 3em of b2-union] (M2) {$M_2$};
+    \node[int2, right = 3em of M2] (b21) {$b_2'$};
+    \node[below = 1em of b2-union] (auct-role2) {Auctioneer 2};
+    \node[block, fit=(M2) (b2) (b2-union) (b21) (auct-role2), draw, inner sep=0.5em] (auctioneer2) {};
+
+    \node[int3, right = 16.5em of s1] (s2) {$s_{1/2}''$};
+    
+    \node[int3, right = 6em of s2] (E1) {E};
+    \node[above = 0.8em of E1] (exec-role1) {Executor};
+    \node[block, fit=(E1) (exec-role1), draw] (executor1) {};
+
+    \node[int3, right = 5em of E1] (s3) {$s_{1/2}'''$};;
+
+    \node[below = 1em of s3] (ctrl-anchor) {};;
+    \node[above right = 1em of s3] (ctrl-role) {Controller};
+    \node[block, fit= (ctrl-role) (ctrl-anchor) (executor1) (s) (s2) (s3), draw, inner xsep = 0.5em] (controller) {};
+
+    \node[int, right = 14em of b11] (b12) {$b''_1$};
+    \node[int2, right = 14em of b21] (b22) {$b''_2$};
+    
+
+    \draw[arrow] (b1) -- (b1-union);
+    \draw[arrow] (b1-union) -- (M1);
+    \draw[arrow] (M1) -- (b11);
+
+    \draw[arrow] (b1) -- (b2-union) node[int, near start]{$\dot{b_1}$};
+    \draw[arrow] (b2) -- (b1-union) node[int2, near start]{$\dot{b_2}$};
+
+    \draw[arrow] (s) -- (s2) node[midway, circle, draw, fill=white]{$\dots$};;
+    \draw[arrow] (s) -- (M1);
+    \draw[arrow] (s) -- (M2);
+
+    
+    \draw[arrow] (b2) -- (b2-union);
+    \draw[arrow] (b2-union) -- (M2);
+    \draw[arrow] (M2) -- (b21);
+
+    \draw[arrow] (b11) -- (E1) node[int, near start]{\small $BX$};;
+    \draw[arrow] (b21) -- (E1) node[int2, near start]{\small $BX$};;
+    \draw[arrow] (s2) -- (E1);
+
+    \draw[arrow] (E1) -- (s3);
+    \draw[arrow] (E1) -- (b12);
+    \draw[arrow] (E1) -- (b22);
+}
+\vspace{2em}
+\caption{Information for bid sharing in parallel composition.}
+\end{figure}
+\vspace{1em}
+
+The following holds:
+
+\begin{equation}
+\begin{aligned}
+    \dot{b_1} = b_1 \wedge \dot{b_2} = b_2 &\Rightarrow b_1 \cup \dot{b_2} = b_2 \cup \dot{b_1} \\
+    M_1 = M_2 &\Rightarrow b'_1 = b'_2
+\end{aligned}
+\end{equation}
+
+How computational cooperation will function in detail will be the subject of another publication. Broadly, the choices range from trusting a single party with computation, potentially verifying the correctness of the results where possible, or running a distributed computation between (a subset of) the auctioneers.
+
+To improve the guarantees for bid sharing, instead of sending them directly to the auctioneers, they could be ordered by the controller, adding a side constraint to all bids that any resource from $R_o$ can only be used if controller signatures are present. This would give guarantees against insertion or censorship of bids submitted to the verified set by the auctioneers during a single round. This can be done in the on-controller and off-controller auction settings.
+
+%To cover all of these, we need to be able to implement the following settings:
+
+%\begin{enumerate}
+%    \item Auctions computed on the controller
+%    \begin{enumerate}
+%        \item during the same tick
+%        \item across ticks
+%    \end{enumerate}
+%    \item Auctions computed off the controller
+%    \begin{enumerate}
+%        \item during the same tick
+%        \item across ticks
+%    \end{enumerate}
+%\end{enumerate}
+    
+%synchronous and asynchronous auction execution. TODO: Does it make sense to call the cases this?
+
+
+% TODO: Do we want to return $b''$ to the auctioneer, leaving it open if it's returned to the agents, or always return to agents as well? This is probably an implementation detail.

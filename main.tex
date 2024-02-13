@@ -1,0 +1,40 @@
+ \documentclass[
+    9pt,            
+    techreport,       
+    affiltop,       
+]{art}
+
+\input{metadata.tex}
+\input{macros.tex}
+
+\usepackage{wasysym, amsmath,amssymb,stmaryrd}
+\usepackage{tikz}
+\usetikzlibrary{graphs}
+\usetikzlibrary{trees}
+%\usepackage{subfig}
+
+\usetikzlibrary{shapes.geometric, arrows, backgrounds, fit, positioning}
+\tikzset{block/.style={rectangle, draw, 
+text width=4.2em, text centered, minimum size=6em},
+line/.style={draw, -latex'},
+int/.style={circle, draw, fill=blue!20, minimum size=2.5em},
+int2/.style={circle, draw, fill=yellow!40, minimum size=2.5em},
+int3/.style={circle, draw, fill=black!10, minimum size=2.5em},
+}
+\tikzstyle{arrow} = [thick,->,>=stealth]
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+
+\input{intro.tex}
+\input{abstract.tex}
+\input{barter.tex}
+\input{appendix.tex}
+\input{acknowledgements.tex}
+
+\bibliography{ref.bib}
+
+\end{document}

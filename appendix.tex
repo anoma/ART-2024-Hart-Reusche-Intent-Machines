@@ -1,0 +1,57 @@
+\section{Appendix}\label{sec:appendix}
+
+\subsection{Proof that $\mathcal{M}$ is a monad}\label{monadProof}
+
+It may not be obvious that $\mathcal{M}$ is, indeed, a monad. To prove this, we must define a notion of monad return and monad bind satisfying the monad laws,
+
+\begin{itemize}
+    \item $\text{return}\ a >>= h \equiv h\ a$
+    \item $m >>= \text{return}\ \equiv m$
+    \item $(m >>= g) >>= h \equiv m >>= (\lambda x. g\ x >>= h)$
+\end{itemize}
+
+We are forced by the types of the operators to have the following implementations;
+
+\begin{itemize}
+    \item $\text{return}\ a := \lambda b. \text{return}_M\ (a, b)$
+    \item $a >>= f := \lambda b. a\ b >>=_M (\lambda (x, b). f\ x\ b) $
+\end{itemize}
+
+With these definitions, we can verify the laws with equatorial reasoning.
+
+\begin{equation} \label{monLaw1}
+\begin{split}
+\text{return}\ a >>= h
+ & = \lambda b. (\lambda b. \text{return}_M (a, b)) b >>=_M \lambda (x, b). h\ x\ b\\
+ & = \lambda b. \text{return}_M (a, b) >>=_M \lambda (x, b). h\ x\ b\\
+ & = \lambda b. (\lambda (x, b). h\ x\ b) (a, b)\\
+ & = \lambda b. h\ a\ b\\
+ & = h\ a
+\end{split}
+\end{equation}
+
+\begin{equation} \label{monLaw2}
+\begin{split}
+m >>= \text{return}
+ & = \lambda b. m b >>=_M \lambda (x, b). (\lambda a\ b. \text{return}_M (a, b))\ x\ b\\
+ & = \lambda b. m\ b >>=_M \lambda (x, b). \text{return}_M (x, b)\\
+ & = \lambda b. m\ b >>=_M \text{return}_M\\
+ & = \lambda b. m\ b\\
+ & = m
+\end{split}
+\end{equation}
+
+\begin{equation} \label{monLaw3}
+\begin{split}
+(m >>= g) >>= h
+ & = \lambda b. (\lambda b. m\ b >>=_M (\lambda (x, b). g\ x\ b))\ b >>=_M \lambda (x, b). h\ x\ b\\
+ & = \lambda b. (m\ b >>=_M (\lambda (x, b). g\ x\ b)) >>=_M \lambda (x, b). h\ x\ b\\
+ & = \lambda b. m\ b >>=_M (\lambda (x, b). (\lambda (x, b). g\ x\ b) (x, b) >>=_M \lambda (x, b). h\ x\ b)\\
+ & = \lambda b. m\ b >>=_M (\lambda (x, b). (g\ x\ b >>=_M \lambda (x, b). h\ x\ b)\\
+ & = \lambda b. m\ b >>=_M (\lambda (x, b). (\lambda b. g\ x\ b >>=_M \lambda (x, b). h\ x\ b)\ b)\\
+ & = \lambda b. m\ b >>=_M (\lambda (x, b). (\lambda x\ b. g\ x\ b >>=_M \lambda (x, b). h\ x\ b)\ x\ b)\\
+ & = m >>= (\lambda x. g\ x >>= h)
+\end{split}
+\end{equation}
+
+This proves that $\mathcal{M}$ is, indeed, a monad.
