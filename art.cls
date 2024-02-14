@@ -359,7 +359,7 @@ fit,                         % TIKZ fitting
   skip=3pt,                                   % vertical space between caption and figure
   labelfont={bf,sf},                          % we bold the caption label
   labelsep=period,                       % periods after label (Fig. 1:)
-  % figurename=Figire                            % figure will be abbreviated
+  % figurename=Figure                            % figure will be abbreviated
   % tablename=Tbl.,                             % table will be abbreviated
 ]{caption}
 % overall font types (excluding label)

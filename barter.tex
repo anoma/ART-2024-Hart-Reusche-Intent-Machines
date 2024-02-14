@@ -37,33 +37,52 @@ For the case of two sided barter auctions, which we want to enable, we need to g
 
 A $bid$, as used in our model, is defined as follows:
 
-\begin{itemize}
-    \item An \textit{offer} side indicates which resources an agent is willing to give up via a predicate $p_d$, and their preferences for ranking options via a utility function $u_d$.
-    \item A \textit{demand} side indicates which resources an agent is hoping to receive via a predicate $p_o$, and their preferences for ranking options via a utility function $u_o$.
-    \item A set of \textit{offer resources} $R_o$ which can be used to the offer side, 
-\end{itemize}
-
-The predicates have the shape $p : \mathcal{P}(R) \to \mathbb{B}$, and range over bundles of resources.
-The utility functions have the shape $u : R \to [0, 1] \subset \mathbb{Q}$.\footnote{If predicates and utility functions are not rolled into one, we gain flexibility: e.g., a user could state predicates that get satisfied, with the utility of the new state still being zero.}.
-
-Putting it all together, we get
 \begin{equation}
-    bid = (p_d, u_d, p_o, u_o, R_o)
+    \begin{aligned}
+        bid &= (p, u, R) \\
+        p &: \mathcal{P}(R) \to \mathbb{B} \\
+        u &: R \to [0, 1] \subset \mathbb{Q}\\
+    \end{aligned}    
 \end{equation}
+
+Predicates $p$ range over $TXs$ and return \texttt{true} if a $TX$ is acceptable to the issuer. Since $p$ can accept different $TXs$ as valid, utility function $u$ is used to order them by preference. $R$ is a set of resources, that can be used to produce $TXs$ by \textit{matching} with other bids. Two bids are \textit{matched} if a $TX$ can be derived from the union of their $R$s such that both of their predicates accept the $TX$ (given there are no alternatives, the ranking induced by $u$ is irrelevant).
+
+Let us look at an example barter\footnote{We use monospace font here to make comparison of bids easier.}, with Agent 1 issuing $bid_1$:
+\texttt{\begin{itemize}
+    \item p: (Offer: 1 Bread OR 1 Teapot) AND (Demand: 1 Pen)
+    \item u: (Give: 1 Bread) AND (Get: 1 Pen): 1.0, (Give: 1 Teapot) AND (Get: 1 Pen): 0.8, (Give: 1 Bread, 1 Teapot) AND (Get: 1 Pen): 0.5
+    \item R: 1 Bread, 1 Teapot
+\end{itemize}}
+
+And Agent 2 issuing $bid_2$:
+\texttt{\begin{itemize}
+    \item p: (Offer: 1 Pen XOR 1 Teacup) AND (Demand: 1 Teapot AND 1 Bread)
+    \item u: (Give: 1 Pen) AND (Get: 1 Teapot, 1 Bread): 1.0, (Give: 1 Teacup) AND (Get: 1 Teapot, 1 Bread): 0.1
+    \item R: 1 Pen, 1 Teacup
+\end{itemize}}
+
+
+A $TX$ that would satisfy both predicates using only resources from the respective $R$, with Agent 1 receiving 0.5 utility and Agent 2 1.0, could like this:
+\texttt{
+\begin{itemize}
+    \item Agent 1 Give: 1 Bread AND 1 Teapot, Agent 2 Give: 1 Pen
+    \item Agent 1 Get: 1 Pen, Agent 2 Get: 1 Bread, 1 Teapot
+\end{itemize}}
+
 
 
 \subsection{Bids implemented by transactions}
 % TODO: whats the difference between offer and demand side. Formulate p_o, R_o connection within bids and within TXs
-Every bid, $p_d, p_o, R_o$ implies a set of (unbalanced)  potential $TXs$, since only the offer side is given. A set of matching bids, $b_i$, is where the offer and demand sides of every $b_i$ are met, implying a balanced $TX$, which can be directly derived from the bid set. Any balanced $TX$ that contains independent subsets of matching bids can be decomposed into smaller $TXs$ corresponding to the independent subsets of matching bids. These smaller independent transactions can all be executed in parallel. We call a set of balanced $TXs$ derived from a set of matching bids a \textit{barter exchange} $BX$. 
+Every bid, $p, u, R$ implies a set of (unbalanced)  potential $TXs$, since only the offer side is given. A set of matching bids, $b_i$, is where the offer and demand sides of every $b_i$ are met, implying a balanced $TX$, which can be directly derived from the bid set. Any balanced $TX$ that contains independent subsets of matching bids can be decomposed into smaller $TXs$ corresponding to the independent subsets of matching bids. These smaller independent transactions can all be executed in parallel. We call a set of balanced $TXs$ derived from a set of matching bids a \textit{barter exchange} $BX$. 
 
 \subsection{Bid $\Leftrightarrow$ Intent correspondence}
 The above is compatible with our definition for Intents $I$, \eqref{eq:intent},
 as follows: 
 
 \begin{itemize}
-    \item The set of $TXs$ implied by $p_d, p_o, R_o$ from a single $bid$ is a transition function: $t: S \to S := s \mapsto s''$ 
-    \item $p_d, p_o$ imply a predicate $p = p_d \land p_o$ which rejects any transition which is incompatible with the above $t$: $p : S \times S \to \mathbb{B}$
-    \item $u_d, u_o$ give a weighting $w(x) = u_d(x) + u_o(x)$ (renormalized) for the state transitions compatible with $t$, not rejected by $p$: $w: S \times S \to [0, 1]$
+    \item The set of $TXs$ implied by $p, R$ from a single $bid$ is a transition function: $t: S \to S := s \mapsto s''$ 
+    \item $p$ rejects any transition which is incompatible with the above $t$: $p : S \times S \to \mathbb{B}$
+    \item $u$ gives a weighting $w(x) = u(x)$ for the state transitions compatible with $t$, not rejected by $p$: $w: S \times S \to [0, 1]$
 \end{itemize}
 
 Putting them all together, we get:
@@ -83,17 +102,17 @@ The predicates on both sides can be used to specify offer/demand pairs of arbitr
     \item Dependent bundles, e.g. if an agent wants a resource of kind A only if they can acquire one of kind B or C at the same time
 \end{itemize}
 
-The demand and offer predicate together specify a set of accepted state transitions, with the utility function ranking them. Outside of satisfying the predicates, the auction mechanism $M$ executed by the auctioneer can be chosen freely. 
+The predicate together specifies a set of accepted state transitions, with the utility function ranking them. Outside of satisfying the predicates, the auction mechanism $M$ executed by the auctioneer can be chosen freely. 
 
 \subsubsection{Bid composition} Multiple bids can be composed into a single bid, for example like this:
 \begin{equation} 
     \begin{aligned}
-    bid_{1\land2} &= ((p_{d_1} \land p_{d_2}), (u_{d_1} + u_{d_2}), (p_{o_1} \land p_{o_2}), (u_{o_1} + u_{o_2}), (R_{o_1} \cup R_{o_2})) \\
+    bid_{1\land2} &= ((p_1 \land p_2), (u_1 + u_2), (R_1 \cup R_2)) \\
     \end{aligned}
 \end{equation}
 
-With $u_i + u_j \Rightarrow u_i(x) + u_j(x)$. 
-More complex dependencies of bids can be expressed via predicates, e.g. "The offer from $bid_1$ is only valid if the demand from $bid_2$ is fulfilled in the same $TX$ or $BX$.
+With $u_i+u_j := \lambda x. u_i(x)+u_j(x)$.
+More complex dependencies of bids can be expressed via predicates, e.g. "The offer from $bid_1$ is only valid if the demand from $bid_2$ is fulfilled in the same $TX$.
 
 \subsection{Roles}
 We also have the following roles:
@@ -103,7 +122,7 @@ We also have the following roles:
     \item A group of \textit{Agents}, which submit bids $b = \{bid_1, \dots, bid_n\}$ to an auctioneer.
     \item One or several \textit{Auctioneers}\footnote{these auctioneers act as solvers}, which receive the bids and match subsets of these according to their offer and demand sides. The matching maximizes a metric given by the auctioneer. From this, we derive a barter exchange $BX$ and submit it to the controller for ordering. The auctioneer can submit $BX$ containing a single $TX$ as soon as a matching set of bids is found, or wait until it has processed more or all of the batch of bids, submitting a larger $BX$.
     %A $TX$ is be derived per independent subset. This set of \textit{ $TX$ candidates} is submitted to the controller. Details of this process are determined by an auction mechanism $M$.
-    \item One\footnote{For now, we assume all resources share the same controller, so only a single one is used. In general, a controller is only responsible for the subset of state containing resources which reference it.} \textit{Controller}, which manages state and orders submitted $BX$ candidates. Time is sliced by discrete \textit{ticks}, during which $TX$ candidates (contained in the $BXs$ and are balanced) are arranged in a partial order, by order of submission to the controller, depending on some ordering mechanism. The end of the current tick and the beginning of the next is delineated by the executor performing a state update.
+    \item One\footnote{For now, we assume all resources share the same controller, so only a single one is used. In general, a controller is only responsible for the subset of state containing resources which reference it.} \textit{Controller}, which manages state and orders submitted $BX$ candidates. Time is sliced by discrete \textit{ticks}, during which $TX$ candidates (which are contained in the $BXs$ and are balanced) are arranged in a partial order, by order of submission to the controller, depending on some ordering mechanism. The end of the current tick and the beginning of the next is delineated by the executor performing a state update.
     \item One \textit{Executor}, which executes candidate $TXs$. This is done by applying the state updates contained in the $TX$ candidates which are valid at execution time, as well as computing and publishing a cumulative state update. Details of this behavior are determined by an execution mechanism $E$. % This is a simplification, Typhon works as follows: It orders transaction candidates, and executes them, updating the state. The execution is at least serializable, which is to say "equivalent" in some sense, to running the transactions one at a time, in sequence. There is no particular notion of "Tick" or "cumulative state update."
 \end{itemize}
 
@@ -184,6 +203,7 @@ Both of the above can depend on reputation-tracking relationships between agents
 Let us start with a restricted setting, in which the auction is computed on the controller, which means the auctioneer and executor have access to the current state of the system at all times. 
 
 \begin{figure}[h]
+\centering
 \tikz{
     \node[int] (M) {M};
     \node[above = 0.8em of M] (auct-role) {Auctioneer};
@@ -271,6 +291,7 @@ To instantiate an intent machine according to our definition in \eqref{eq:M-mona
 \subsection{Auctions computed independently of the controller}
 
 \begin{figure}[H]
+\centering
 \tikz{
     \node[int] (b1) {$b_1$};
     \node[above = 0.8em of b1] (agent-role1) {Agents 1};
@@ -359,7 +380,7 @@ In the given context, none of the entities $M$, $E$, or any individual bid machi
     \end{aligned}
 \end{equation} 
 
-In \cref{fig:controller-independent}, we can see two off-controller auctions $A_1$ (blue objects) with $\{b_1, b_1', b_1'', M_1, s_1, s_1', s_1'', s_1'''\}$ and $A_2$ (yellow objects) with $\{b_2, b_2', b_2'', M_2, s_2, s_2', s_2'', s_2'''\}$, sharing the same, single executor and $E$, which runs on a single controller\footnote{The roles of Agents 1+2, as well as Auctioneers 1+2 \textit{could} in practice be implemented by the same entities.}.
+In \cref{fig:controller-independent}, we can see two off-controller auctions $A_1$ (blue objects) with $\{b_1, b_1', b_1'', M_1, s_1, s_1', s_1'', s_1'''\}$ and $A_2$ (yellow objects) with $\{b_2, b_2', b_2'', M_2, s_2, s_2', s_2'', s_2'''\}$, sharing the same, single executor and $E$, which runs on a single controller\footnote{The roles of Agents 1+2, as well as Auctioneers 1+2 \textit{could} in practice be implemented by the same entities.}.\\[2mm]
 
 \noindent\textbf{Auctioneers:}
 \begin{itemize}
@@ -500,7 +521,7 @@ If auctioneers collate bids from different sets of agents before forwarding them
 % Same for Mechanism of cooperative Auctioneer
 
 \subsubsection{Parallel composition}
-Parallel composition means running the bid machine on a union (of subsets of) the bids received by bid machines during one tick of a given controller. For this, we need to do parallel composition of the auctioneers and executors individually. Composing executors in parallel means all executors are collapsed into a single one\footnote{This can happen by every executor delegating to the same executor. Or, since in practice, controllers and executors will often be implemented by consensus providers, the collapsing could be done e.g. via spinning up a chimera chain (\href{https://anoma.net/blog/chimera-chains}{blog post}).}
+Parallel composition means running the bid machine on a union (of subsets of) the bids received by bid machines during one tick of a given controller. For this, we need to do parallel composition of the auctioneers and executors individually. Composing executors in parallel means all executors are collapsed into a single one\footnote{This can happen by every executor delegating to the same executor. Or, since in practice, controllers and executors will often be implemented by consensus providers, the collapsing could be done e.g. via spinning up a chimera chain, see \url{https://anoma.net/blog/chimera-chains}.}
 
 For auctioneers we need to characterize a spectrum of cooperation with three axes, the specific parameters of which are decided upon by external governance.
 
